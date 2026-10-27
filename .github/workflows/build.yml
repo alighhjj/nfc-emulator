@@ -37,7 +37,7 @@ env:
 jobs:
   # ---------------------------------------------------------------------------
   test:
-    name: 单元测试 core-nfcc
+    name: 单元测试
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -56,19 +56,26 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: 跑 core-nfcc 单元测试
+      # 一次跑两个模块的 JVM 单测：
+      #   core-nfcc —— 纯算法（hex / TLV / UID / NXP conf 定位）
+      #   app       —— 判卡逻辑（TagClassifier / TagSnapshot），不依赖真机
+      # 放在同一个 job 里是有意的：它同时起到「最早一次编译检查」的作用，
+      # 编译错误会在这里暴露，而不是等到 3 分钟后的 assemble。
+      - name: 跑单元测试
         run: |
           set -o pipefail
-          gradle :core-nfcc:test $GRADLE_FLAGS 2>&1 | tee ci-build.log
+          gradle :core-nfcc:test :app:testDebugUnitTest $GRADLE_FLAGS 2>&1 | tee ci-build.log
 
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: core-nfcc-test-report
+          name: test-report
           path: |
             core-nfcc/build/reports/tests/test
             core-nfcc/build/test-results/test
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
           if-no-files-found: warn
 
       - name: 失败时回传日志（注解 + ci-logs 分支）

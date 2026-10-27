@@ -18,11 +18,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,23 +41,108 @@ import io.github.nfcemu.diagnose.DeviceProbe
 import io.github.nfcemu.diagnose.DeviceReport
 import io.github.nfcemu.diagnose.ReportSection
 import io.github.nfcemu.hce.RelayHostApduService
+import io.github.nfcemu.reader.NfcReader
+import io.github.nfcemu.reader.TagSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var reader: NfcReader
+
+    /** 最近读到的卡（按 UID 去重，最多 [MAX_CARDS] 张）。 */
+    private val cards = mutableStateListOf<TagSnapshot>()
+
+    private var readerOn by mutableStateOf(true)
+    private var readerStatus by mutableStateOf("")
+    private var readerMessage by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        reader = NfcReader(this)
+        // 回调在 binder 线程，改 Compose state 必须回主线程。
+        reader.onSnapshot = { snap ->
+            runOnUiThread {
+                cards.removeAll { it.uidHex == snap.uidHex }
+                cards.add(0, snap)
+                while (cards.size > MAX_CARDS) cards.removeAt(cards.size - 1)
+                readerMessage = null
+                updateReaderStatus()
+            }
+        }
+        reader.onError = { msg ->
+            runOnUiThread { readerMessage = msg }
+        }
+
         setContent {
             NfcEmuTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    DiagnosticsScreen()
+                    DiagnosticsScreen(
+                        readerStatus = readerStatus,
+                        readerEnabled = readerOn,
+                        readerMessage = readerMessage,
+                        cards = cards,
+                        onToggleReader = { want ->
+                            readerOn = want
+                            if (want) startReader() else stopReader()
+                            updateReaderStatus()
+                        },
+                        onOpenNfcSettings = { reader.openNfcSettings() },
+                        onClearCards = { cards.clear() },
+                    )
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从设置页回来时 NFC 状态可能已经变了，这里总是重算一次。
+        if (readerOn) startReader() else stopReader()
+        updateReaderStatus()
+    }
+
+    override fun onPause() {
+        // 必须关掉：reader mode 是全局独占的，不退会让手机后面所有 NFC 操作都失败。
+        stopReader()
+        super.onPause()
+    }
+
+    private fun startReader() {
+        val ok = reader.start()
+        if (ok) {
+            // 上一次失败留下的红字在成功之后必须清掉，否则用户会以为还在坏。
+            if (readerMessage != null) readerMessage = null
+            return
+        }
+        readerMessage = when {
+            !reader.hardwareAvailable -> "本机没有 NFC 硬件。"
+            !reader.enabled -> "系统 NFC 未开启，先打开 NFC 再回来。"
+            else -> "进入读卡模式失败（可能 NFC 正在初始化），把上面的开关关掉再打开试一次。"
+        }
+    }
+
+    private fun stopReader() {
+        reader.stop()
+    }
+
+    private fun updateReaderStatus() {
+        readerStatus = when {
+            !reader.hardwareAvailable -> "无 NFC 硬件"
+            !reader.enabled -> "系统 NFC 已关闭"
+            reader.running -> "读卡中 · 把卡贴到手机背面"
+            readerOn -> "读卡未就绪"
+            else -> "读卡已关闭（此时本机其他 NFC 功能可正常使用）"
+        }
+    }
+
+    private companion object {
+        const val MAX_CARDS = 5
     }
 }
 
@@ -64,13 +152,21 @@ private fun NfcEmuTheme(content: @Composable () -> Unit) {
 }
 
 /**
- * M0 的唯一界面：兼容性诊断。
+ * 主界面。
  *
- * 刻意不做卡片列表 / 模拟开关 / 扫描动画 —— 那些都要等 M3（UID 注入）跑通之后才有意义。
- * 在"能不能改 UID"这个核心问题有答案之前堆 UI，等于把时间花在会被推翻的东西上。
+ * M0 时这里只有兼容性诊断；M1 加了读卡。刻意**没有**做"模拟开关"——
+ * 那是 M3（UID 注入）的事，在 UID 能不能写成功有答案之前放个开关只会误导用户。
  */
 @Composable
-private fun DiagnosticsScreen() {
+private fun DiagnosticsScreen(
+    readerStatus: String,
+    readerEnabled: Boolean,
+    readerMessage: String?,
+    cards: List<TagSnapshot>,
+    onToggleReader: (Boolean) -> Unit,
+    onOpenNfcSettings: () -> Unit,
+    onClearCards: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -109,9 +205,19 @@ private fun DiagnosticsScreen() {
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "M0 · 兼容性诊断。先把「这台机器能做什么」算清楚，再谈模拟。",
+            text = "M1 · 先认卡，再谈模拟。贴一张卡上来，看它属于哪一类。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        ReaderCard(
+            status = readerStatus,
+            enabled = readerEnabled,
+            message = readerMessage,
+            cards = cards,
+            onToggle = onToggleReader,
+            onOpenSettings = onOpenNfcSettings,
+            onClear = onClearCards,
         )
 
         Row(
@@ -162,6 +268,140 @@ private fun DiagnosticsScreen() {
         )
     }
 }
+
+// =====================================================================================
+// M1 读卡区
+// =====================================================================================
+
+@Composable
+private fun ReaderCard(
+    status: String,
+    enabled: Boolean,
+    message: String?,
+    cards: List<TagSnapshot>,
+    onToggle: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("读卡", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onToggle)
+            }
+
+            Text(
+                text = "读卡开着的时候，手机的 NFC 支付/自带门禁会被本 App 抢占 —— " +
+                    "这是 reader mode 的独占特性，不是 bug。不用时请关掉。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onOpenSettings) { Text("系统 NFC 设置") }
+                if (cards.isNotEmpty()) {
+                    TextButton(onClick = onClear) { Text("清空列表") }
+                }
+            }
+
+            if (message != null) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (cards.isEmpty()) {
+                Text(
+                    text = "把卡贴到手机背面 NFC 感应区（通常在摄像头附近），最多保留最近 5 张。\n" +
+                        "本步骤只读取公开信息（UID/ATQA/SAK/历史字节），不发送任何命令，" +
+                        "不会触发认证，也不会改动卡上数据。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+
+    cards.forEach { CardReport(it) }
+}
+
+@Composable
+private fun CardReport(snap: TagSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "读到的卡",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = snap.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+
+            snap.rows().forEach { (k, v) ->
+                Column {
+                    Text(
+                        text = k,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = v,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+
+            // 结论卡：这张卡在"模拟"这件事上到底有没有戏，是最该被看到的文字。
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "模拟可行性",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // CardKind.emulation 里用了 ** 做强调，Compose 的 Text 不解析 Markdown，
+                    // 直接显示会露出星号，这里去掉。
+                    Text(
+                        text = snap.kind.emulation.replace("**", ""),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            if (snap.notes.isNotEmpty()) {
+                Text("备注", style = MaterialTheme.typography.labelSmall)
+                snap.notes.forEach {
+                    Text("· $it", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+// =====================================================================================
+// M0 诊断区
+// =====================================================================================
 
 @Composable
 private fun VerdictCard(report: DeviceReport) {

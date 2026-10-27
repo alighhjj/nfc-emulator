@@ -2,8 +2,8 @@
 
 安卓 NFC 卡模拟实验项目。**编译、签名、发行全部在 GitHub Actions 上完成**，本地不需要 Android SDK。
 
-> 当前进度：**M0（骨架 + 兼容性诊断）**。还没有实现 UID 写入 —— 那是 M3 的事，
-> 在那之前所有界面只服务于一个目的：把「这台机器到底能做什么」算清楚。
+> 当前进度：**M1（读卡 + 卡片类型判定）**。还没有实现 UID 写入 —— 那是 M3 的事，
+> 在那之前所有界面只服务于一个目的：把「这台机器能做什么、这张卡能做什么」算清楚。
 
 ---
 
@@ -187,12 +187,51 @@ python tools/nxp_conf.py patch libnfc-nxp.conf 42:4D:44:4A   # 打印 diff，不
 
 ---
 
+## M1：读卡与「这张卡能不能模拟」
+
+这一步的产出不是"能读卡"（那是 Android 自带能力），而是**判卡**：
+贴一张卡上去，立刻告诉你它属于哪一类、在模拟这件事上有没有戏。
+
+### 判卡顺序（写错就会把唯一有戏的卡判成没戏）
+
+| 顺序 | 条件 | 判为 | 为什么放这个位置 |
+|---|---|---|---|
+| 1 | `NfcF` | FeliCa | 独立协议族，不参与 NFC-A 判定 |
+| 2 | `NfcV` | ISO15693 | 同上 |
+| 3 | `IsoDep` **且** `MifareClassic` | ISO-DEP（双协议） | SAK `0x28/0x38` 的 SmartMX 门禁卡会同时挂两个 tech。**必须判成 ISO-DEP** —— APDU 是 HCE 唯一能覆盖的层面，判成 Classic 会得出「完全没戏」的错误结论 |
+| 4 | `IsoDep` | ISO-DEP | 银行卡、DESFire、加密门禁、手机 HCE |
+| 5 | `NfcB` | ISO14443-3B | — |
+| 6 | `MifareClassic` | MIFARE Classic | Crypto1，数据层无法用 HCE 模拟 |
+| 7 | `MifareUltralight` | Ultralight / NTAG | — |
+| 8 | 只有 `NfcA` | 看 SAK | 部分 ROM 会裁掉 tech 列表，此时 SAK bit5 比 tech 列表可信 |
+
+### 为什么读卡阶段一条命令都不发
+
+`NfcReader` **只读 tag extras**（发现阶段由 NFCC 缓存好的 UID / ATQA / SAK / 历史字节），
+全程不 `connect()`、不 `transceive()`。三个理由：
+
+1. 这些信息本来就够判卡，不需要发命令；
+2. 不连接就不会触发 Crypto1 认证 —— 某些系统在认证失败若干次后会**锁卡**，
+   读卡器不该有这种副作用；
+3. 不连接就不需要持有 `Tag` 引用，从根上避开 `IllegalStateException`。
+   真正要发命令的 M2（扇区 dump）会单独一层，并明确标注"会做功"。
+
+### reader mode 的一个副作用，必须知道
+
+`enableReaderMode` 是**全局独占**的：开着的时候，手机的 NFC 支付、自带门禁卡全部失效，
+因为它们拿不到卡。这是 Android 的设计，不是 bug。
+
+所以退出界面（`onPause`）时一定会 `disableReaderMode`，界面上也放了开关。
+如果你发现"这个 App 一装，手机就刷不了地铁"，先看这个开关有没有被留在打开状态。
+
+---
+
 ## 里程碑
 
 | | 内容 | 状态 |
 |---|---|---|
 | M0 | 骨架、构建链、CI、兼容性诊断 | **已完成，CI 全绿（69 个单测通过，debug APK 可出）** |
-| M1 | 读卡：reader mode + 各 tech 的 UID/ATQA/SAK 采集 | 待做 |
+| M1 | 读卡：reader mode + 各 tech 的 UID/ATQA/SAK 采集 + 卡片类型判定 | **已完成（判卡逻辑有 26 个单测，真机读卡待用户贴卡验证）** |
 | M2 | MIFARE Classic 扇区 dump（含 Crypto1 认证）、卡片库存储 | 待做 |
 | M3 | **UID 注入**（`RUNTIME_NCI` / `CONF_INPLACE`）+ 回滚状态机 | 待做 |
 | M4 | Magisk 模块生成器（含 overlay 与卸载清理） | 待做 |
