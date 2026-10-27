@@ -71,8 +71,12 @@ jobs:
             core-nfcc/build/test-results/test
           if-no-files-found: warn
 
-      - name: 失败时把日志推回仓库
+      - name: 失败时回传日志（注解 + ci-logs 分支）
         if: failure()
+        env:
+          # 注意：Actions 不会自动把 token 注入 run 步骤的 env，必须显式传，
+          # 否则脚本里读到空值，push 会静默失败。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/ci-publish-log.sh ci-build.log
 
   # ---------------------------------------------------------------------------
@@ -130,8 +134,12 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: warn
 
-      - name: 失败时把日志推回仓库
+      - name: 失败时回传日志（注解 + ci-logs 分支）
         if: failure()
+        env:
+          # 注意：Actions 不会自动把 token 注入 run 步骤的 env，必须显式传，
+          # 否则脚本里读到空值，push 会静默失败。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/ci-publish-log.sh ci-build.log
 
   # ---------------------------------------------------------------------------
@@ -258,6 +266,10 @@ jobs:
 
             校验值见 `checksum.txt`。
 
-      - name: 失败时把日志推回仓库
+      - name: 失败时回传日志（注解 + ci-logs 分支）
         if: failure()
+        env:
+          # 注意：Actions 不会自动把 token 注入 run 步骤的 env，必须显式传，
+          # 否则脚本里读到空值，push 会静默失败。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/ci-publish-log.sh ci-build.log
