@@ -2,13 +2,16 @@ name: build
 
 # =============================================================================
 # 这个 workflow 是整个项目的"编译环境"。
-# 仓库作者本机没有 Android SDK、没有 JDK 17、也无法访问 Gradle 发行包，
-# 所以唯一能验证"代码到底编不编得过"的地方就是这里。
+# 仓库作者本机没有 Android SDK、没有 JDK 17，也无法访问 github.com（企业代理 502），
+# 所以：
+#   1. 唯一能验证"代码到底编不编得过"的地方是这里；
+#   2. 失败日志也看不到网页，因此失败时会把日志 commit 到 ci-logs 分支，
+#      开发机 git fetch 即可读（见 tools/ci-publish-log.sh）。
 #
 # 三条流水线：
-#   1. test    —— 只跑 core-nfcc 的纯 JVM 单元测试（不需要 Android SDK，最快）
-#   2. assemble—— 编 debug + release（未签名）+ lint，产物留档
-#   3. release —— 打 tag 时触发：apksigner 手动签 v1+v2+v3+v4，发 GitHub Release
+#   test     —— 只跑 core-nfcc 的纯 JVM 单元测试（不需要 Android SDK，最快）
+#   assemble —— 编 debug + release（未签名）+ lint，产物留档
+#   release  —— 打 tag 时触发：apksigner 手动签 v1+v2+v3+v4，发 GitHub Release
 # =============================================================================
 
 on:
@@ -22,12 +25,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# contents: write 是为了失败时能把日志推到 ci-logs 分支
 permissions:
-  contents: read
+  contents: write
 
 env:
   GRADLE_VERSION: '8.11.1'
   JAVA_VERSION: '17'
+  GRADLE_FLAGS: '--no-daemon --stacktrace --console=plain'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -44,7 +49,7 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 仓库里没有提交 gradle-wrapper.jar（二进制产物，本机无法可信地生成）。
+      # 仓库里没有提交 gradle-wrapper.jar（二进制产物，作者本机无法可信地生成）。
       # 这里由官方 action 直接安装指定版本的 Gradle 并把 `gradle` 放进 PATH。
       - name: 安装 Gradle ${{ env.GRADLE_VERSION }}
         uses: gradle/actions/setup-gradle@v4
@@ -52,7 +57,9 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: 跑 core-nfcc 单元测试
-        run: gradle :core-nfcc:test --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :core-nfcc:test $GRADLE_FLAGS 2>&1 | tee ci-build.log
 
       - name: 上传测试报告
         if: always()
@@ -63,6 +70,10 @@ jobs:
             core-nfcc/build/reports/tests/test
             core-nfcc/build/test-results/test
           if-no-files-found: warn
+
+      - name: 失败时把日志推回仓库
+        if: failure()
+        run: bash tools/ci-publish-log.sh ci-build.log
 
   # ---------------------------------------------------------------------------
   assemble:
@@ -92,21 +103,24 @@ jobs:
           ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null || true
 
       - name: 编译 debug 与 release（未签名）
-        run: >
-          gradle :app:assembleDebug :app:assembleRelease
-          --no-daemon --stacktrace --warning-mode=all
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug :app:assembleRelease $GRADLE_FLAGS 2>&1 | tee ci-build.log
 
       - name: 静态检查
-        run: gradle :app:lintDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:lintDebug $GRADLE_FLAGS 2>&1 | tee -a ci-build.log
 
       - name: 上传 APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apk
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: 上传 lint 报告
         if: always()
@@ -116,14 +130,16 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: warn
 
+      - name: 失败时把日志推回仓库
+        if: failure()
+        run: bash tools/ci-publish-log.sh ci-build.log
+
   # ---------------------------------------------------------------------------
   release:
     name: 签名并发行
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: assemble
-    permissions:
-      contents: write
     env:
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -146,16 +162,17 @@ jobs:
       - name: 构建未签名 release APK
         env:
           VERSION_NAME: ${{ github.ref_name }}
-        run: >
-          gradle :app:assembleRelease
-          -PversionName="${VERSION_NAME#v}"
-          -PversionCode="${{ github.run_number }}"
-          --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleRelease \
+            -PversionName="${VERSION_NAME#v}" \
+            -PversionCode="${{ github.run_number }}" \
+            $GRADLE_FLAGS 2>&1 | tee ci-build.log
 
       # ---------------------------------------------------------------------
       # 签名密钥。
       # 仓库配置了 KEYSTORE_B64 就用正式密钥；没有就临时生成一个，
-      # 让 fork 出来的人 / PR 也能跑通发行流程（只是升级安装会签名不一致）。
+      # 让 fork 出来的人也能跑通发行流程（只是升级安装会签名不一致）。
       # ---------------------------------------------------------------------
       - name: 准备签名密钥
         id: keystore
@@ -237,11 +254,10 @@ jobs:
 
             - 需要 root（Magisk / KernelSU / APatch）才能改写 UID；不 root 只能读卡与 HCE 中继。
             - 首次打开请先看"兼容性诊断"页的结论，再决定用哪条注入路径。
-            - 本 APK 签名方案：v1 + v2 + v3 + v4（v4 的 `.idsig` 文件供 `adb install --incremental` 使用）。
+            - 签名方案：v1 + v2 + v3 + v4（`.idsig` 供 `adb install --incremental` 使用）。
 
-            ## 校验
+            校验值见 `checksum.txt`。
 
-            ```
-            ${{ steps.sign.outputs.apk }}
-            ```
-            见 `checksum.txt`。
+      - name: 失败时把日志推回仓库
+        if: failure()
+        run: bash tools/ci-publish-log.sh ci-build.log

@@ -7,7 +7,10 @@ plugins {
 
 android {
     namespace = "io.github.nfcemu"
-    compileSdk = 35
+    // 用 34 而不是 35：GitHub runner 的 SDK 镜像一定带 android-34，
+    // 35 要看镜像版本，缺了会让 AGP 走自动下载，多一处可能在 CI 上失败的地方。
+    // 本项目没有任何 API 35 的诉求，targetSdk 也停在 34。
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "io.github.nfcemu"
@@ -91,14 +94,13 @@ android {
     }
 }
 
+// 统一用 toolchain 决定 JVM 目标：
+//   jvmToolchain(17) 会同时作用于 Java 与 Kotlin 编译，避免出现
+//   "Inconsistent JVM-target compatibility (javac 17 vs kotlinc 1.8)" 这类构建失败。
+// 刻意不用 kotlin { compilerOptions { } } 这个新 DSL —— 它在 KGP 2.0 的 Android 扩展上
+// 是否可用我没法在本机验证，而 jvmToolchain 是各版本都稳的那一个。
 kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        freeCompilerArgs.addAll(
-            "-opt-in=kotlin.RequiresOptIn",
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-        )
-    }
+    jvmToolchain(17)
 }
 
 dependencies {
