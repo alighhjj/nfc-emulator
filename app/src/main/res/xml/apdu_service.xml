@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HCE 服务的 AID 声明。
+  注意 AID 必须是合法的大写十六进制、长度为偶数。
+  正式功能（中继/自定义卡片）会在 M6 之后按需增删 AID 组。
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/hce_service_desc"
+    android:requireDeviceUnlock="false">
+
+    <aid-group
+        android:category="other"
+        android:description="@string/hce_aid_group_desc">
+
+        <!-- 自造的测试 AID，仅用于验证 HCE 通道是否打通，不占用任何真实支付应用的空间 -->
+        <aid-filter android:name="F0010203040506" />
+    </aid-group>
+</host-apdu-service>

@@ -1,0 +1,247 @@
+name: build
+
+# =============================================================================
+# 这个 workflow 是整个项目的"编译环境"。
+# 仓库作者本机没有 Android SDK、没有 JDK 17、也无法访问 Gradle 发行包，
+# 所以唯一能验证"代码到底编不编得过"的地方就是这里。
+#
+# 三条流水线：
+#   1. test    —— 只跑 core-nfcc 的纯 JVM 单元测试（不需要 Android SDK，最快）
+#   2. assemble—— 编 debug + release（未签名）+ lint，产物留档
+#   3. release —— 打 tag 时触发：apksigner 手动签 v1+v2+v3+v4，发 GitHub Release
+# =============================================================================
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_VERSION: '8.11.1'
+  JAVA_VERSION: '17'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  test:
+    name: 单元测试 core-nfcc
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # 仓库里没有提交 gradle-wrapper.jar（二进制产物，本机无法可信地生成）。
+      # 这里由官方 action 直接安装指定版本的 Gradle 并把 `gradle` 放进 PATH。
+      - name: 安装 Gradle ${{ env.GRADLE_VERSION }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 跑 core-nfcc 单元测试
+        run: gradle :core-nfcc:test --no-daemon --stacktrace
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-nfcc-test-report
+          path: |
+            core-nfcc/build/reports/tests/test
+            core-nfcc/build/test-results/test
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  assemble:
+    name: 编译 APK
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 安装 Gradle ${{ env.GRADLE_VERSION }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 打印 SDK 信息
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls -d "$ANDROID_HOME"/platforms/* 2>/dev/null || true
+          ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null || true
+
+      - name: 编译 debug 与 release（未签名）
+        run: >
+          gradle :app:assembleDebug :app:assembleRelease
+          --no-daemon --stacktrace --warning-mode=all
+
+      - name: 静态检查
+        run: gradle :app:lintDebug --no-daemon --stacktrace
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: 上传 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  release:
+    name: 签名并发行
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: assemble
+    permissions:
+      contents: write
+    env:
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 安装 Gradle ${{ env.GRADLE_VERSION }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 构建未签名 release APK
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+        run: >
+          gradle :app:assembleRelease
+          -PversionName="${VERSION_NAME#v}"
+          -PversionCode="${{ github.run_number }}"
+          --no-daemon --stacktrace
+
+      # ---------------------------------------------------------------------
+      # 签名密钥。
+      # 仓库配置了 KEYSTORE_B64 就用正式密钥；没有就临时生成一个，
+      # 让 fork 出来的人 / PR 也能跑通发行流程（只是升级安装会签名不一致）。
+      # ---------------------------------------------------------------------
+      - name: 准备签名密钥
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          set -eu
+          work="$RUNNER_TEMP/sign"
+          mkdir -p "$work"
+          ks="$work/release.jks"
+          alias_name="${KEY_ALIAS:-nfcemu}"
+          store_pass="${KEY_STORE_PASS:-nfcemu-ci-temporary}"
+          key_pass="${KEY_PASS:-$store_pass}"
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+            echo "::notice::使用仓库 Secrets 提供的签名密钥"
+          else
+            keytool -genkeypair -v -keystore "$ks" -alias "$alias_name" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$store_pass" -keypass "$key_pass" \
+              -dname "CN=nfc-emulator, OU=ci, O=nfc-emulator, C=CN"
+            echo "::warning::未配置 KEYSTORE_B64，本次使用临时自签名密钥；此类产物不适合长期分发"
+          fi
+          echo "ks=$ks" >> "$GITHUB_OUTPUT"
+          echo "alias=$alias_name" >> "$GITHUB_OUTPUT"
+          echo "storepass=$store_pass" >> "$GITHUB_OUTPUT"
+          echo "keypass=$key_pass" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 签名。
+      # 顺序不能反：必须先 zipalign 再 apksigner，否则 v2/v3 的整包签名块会失效。
+      # 这里显式打开 v1+v2+v3+v4 —— AGP 的 signingConfig 给不出 v4(idsig)。
+      # ---------------------------------------------------------------------
+      - name: zipalign + apksigner（v1/v2/v3/v4）
+        id: sign
+        run: |
+          set -eu
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          echo "使用 build-tools: $BT"
+
+          UNSIGNED="$(ls app/build/outputs/apk/release/*-unsigned.apk | head -1)"
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT="nfc-emulator-${VERSION}.apk"
+
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" aligned.apk
+
+          "$BT/apksigner" sign \
+            --ks "${{ steps.keystore.outputs.ks }}" \
+            --ks-key-alias "${{ steps.keystore.outputs.alias }}" \
+            --ks-pass "pass:${{ steps.keystore.outputs.storepass }}" \
+            --key-pass "pass:${{ steps.keystore.outputs.keypass }}" \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled true \
+            --out "$OUT" \
+            aligned.apk
+
+          echo "=== 验证签名 ==="
+          "$BT/apksigner" verify --verbose --print-certs "$OUT"
+
+          echo "=== 产物 ==="
+          ls -l "$OUT" "$OUT.idsig"
+          sha256sum "$OUT" | tee checksum.txt
+
+          echo "apk=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.sign.outputs.apk }}
+            ${{ steps.sign.outputs.apk }}.idsig
+            checksum.txt
+          body: |
+            ## 安装说明
+
+            - 需要 root（Magisk / KernelSU / APatch）才能改写 UID；不 root 只能读卡与 HCE 中继。
+            - 首次打开请先看"兼容性诊断"页的结论，再决定用哪条注入路径。
+            - 本 APK 签名方案：v1 + v2 + v3 + v4（v4 的 `.idsig` 文件供 `adb install --incremental` 使用）。
+
+            ## 校验
+
+            ```
+            ${{ steps.sign.outputs.apk }}
+            ```
+            见 `checksum.txt`。

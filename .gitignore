@@ -1,0 +1,31 @@
+# ---- Gradle ----
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# ---- Android ----
+*.apk
+*.aab
+*.ap_
+*.dex
+*.idsig
+captures/
+.cxx/
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# ---- 签名物料（绝不入库） ----
+*.jks
+*.keystore
+keystore.properties
+release-keystore.*
+
+# ---- 分析产物 ----
+/tmp/
+*.log
+reports/

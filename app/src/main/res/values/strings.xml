@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NFC 卡模拟实验室</string>
+    <string name="hce_service_desc">NFC 中继 / 模拟服务（实验用途）</string>
+    <string name="hce_aid_group_desc">实验用 AID</string>
+</resources>

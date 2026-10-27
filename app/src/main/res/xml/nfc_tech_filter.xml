@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================================
+  NFC tech filter：正确写法示范
+  ============================================================================
+  语义（很多人写错的地方）：
+    * 同一个 tech-list 内的多个 tech 元素是 **AND** 关系；
+    * 多个 tech-list 之间是 **OR** 关系。
+
+  反面教材（本项目分析过的 Sinii/NFCEmulator 就是这么写的）：
+  把 IsoDep / NfcA / MifareClassic 等 8 个 tech 元素全塞进同一个 tech-list 里。
+  这等于要求一张卡同时是 IsoDep 和 MifareClassic，物理上不存在，永远匹配不到。
+
+  本文件目前不被运行时使用（读卡走 enableReaderMode，不依赖 intent filter），
+  保留在这里是为了：
+    1. 给 M4 之后可能加入的 ACTION_TECH_DISCOVERED 路径留好正确模板；
+    2. 让 review 的人一眼看到"这里曾经有个坑，我们没踩"。
+
+  注意：XML 注释里不能出现连续两个减号，所以本文件的分隔线统一用等号。
+  ============================================================================
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedResources">
+
+    <!-- ISO-DEP / ISO14443-4：银行卡、CPU 卡、手机 HCE、绝大多数门禁 -->
+    <tech-list>
+        <tech>android.nfc.tech.IsoDep</tech>
+    </tech-list>
+
+    <!-- MIFARE Classic：老门禁/电梯卡的主力，需要 Crypto1 认证 -->
+    <tech-list>
+        <tech>android.nfc.tech.NfcA</tech>
+        <tech>android.nfc.tech.MifareClassic</tech>
+    </tech-list>
+
+    <!-- ISO14443-3A 非 Classic：Ultralight / NTAG 系列 -->
+    <tech-list>
+        <tech>android.nfc.tech.NfcA</tech>
+    </tech-list>
+
+    <!-- ISO14443-3B -->
+    <tech-list>
+        <tech>android.nfc.tech.NfcB</tech>
+    </tech-list>
+
+    <!-- FeliCa（日本 Suica 等） -->
+    <tech-list>
+        <tech>android.nfc.tech.NfcF</tech>
+    </tech-list>
+
+    <!-- ISO15693 / Vicinity -->
+    <tech-list>
+        <tech>android.nfc.tech.NfcV</tech>
+    </tech-list>
+
+</resources>

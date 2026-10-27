@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- NFC 是核心能力，没有就什么都做不了 -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!--
+      required="false" 而不是 true：
+      本 App 第一个界面就是"兼容性诊断"，让用户在没 NFC 的设备上也能装进去、
+      看到一份明确的"你的设备缺什么"报告，比直接装不上更有用。
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.nfc.hce"
+        android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NfcEmu">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          ========================================================================
+          HCE 中继服务
+          ========================================================================
+          三个标识符必须完全正确，否则系统根本不会把 APDU 送到这里
+          （这是本项目分析的两个参考实现都写错的地方）：
+
+            action      android.nfc.cardemulation.action.HOST_APDU_SERVICE
+            meta-data   android.nfc.cardemulation.host_apdu_service
+            AID 文件    用 aid-group / aid-filter 元素，而不是裸 aid 元素
+
+          permission 必须是 BIND_NFC_SERVICE，否则 bind 会被系统拒绝。
+          ========================================================================
+        -->
+        <service
+            android:name=".hce.RelayHostApduService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/apdu_service" />
+        </service>
+
+    </application>
+</manifest>

@@ -1,0 +1,17 @@
+# 统一换行符。
+# 单元测试里有大量多行字符串（conf 片段），如果 checkout 时被转成 CRLF，
+# Kotlin 的 raw string 里就会多出 \r —— 虽然 lines() 能容忍，但硬编码下标会错位。
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.jar binary
+*.png binary
+*.webp binary
+*.apk binary
+*.jks binary
+*.keystore binary
+
+# Gradle wrapper 的 jar 若日后被生成，不要当成文本处理
+gradle/wrapper/gradle-wrapper.jar binary
