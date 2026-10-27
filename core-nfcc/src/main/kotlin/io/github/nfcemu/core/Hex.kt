@@ -45,6 +45,10 @@ object Hex {
         for (i in bytes.indices) {
             if (i > 0) {
                 if (bytesPerLine > 0 && i % bytesPerLine == 0) {
+                    // 换行前先补一个分隔符（去掉尾部空格），
+                    // 这样得到的是 "20, 02, 2D,\n        02, 08, 05" 而不是 "2D\n02"，
+                    // 与 NXP 原生 conf 文件的排版一致，diff 时不会出现"少了逗号"的噪声。
+                    if (separator.isNotEmpty()) sb.append(separator.trimEnd())
                     sb.append('\n').append(linePrefix)
                 } else {
                     sb.append(separator)

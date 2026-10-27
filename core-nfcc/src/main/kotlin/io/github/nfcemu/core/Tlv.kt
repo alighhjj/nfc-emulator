@@ -13,35 +13,50 @@ class TlvFormatException(message: String, val offset: Int = -1) : IllegalArgumen
  * 不变量：
  *  - `tag` ∈ [0x00, 0xFF]
  *  - `value.size` ∈ [0x00, 0xFF]
- *  - `value` 对外只读（构造时已拷贝，getter 再拷贝一次）
+ *  - 内部字节数组永不外泄：`value` 的 getter **每次**返回副本
+ *
+ * 注意这里踩过的坑：写成 `val value = value.copyOf()` 只挡住了"构造后改入参"，
+ * getter 返回的仍是内部数组，调用方 `p.value[0] = x` 会直接改掉内部状态。
+ * 必须用 `private val raw` + `get() = raw.copyOf()` 才是真正的不可变。
  */
 class TlvParam(tag: Int, value: ByteArray) {
 
     val tag: Int = tag
-    val value: ByteArray = value.copyOf()
+
+    /** 内部存储，永不外泄。 */
+    private val raw: ByteArray = value.copyOf()
 
     init {
         require(tag in 0x00..0xFF) { "TLV tag 越界: 0x${tag.toString(16)}" }
-        require(this.value.size <= 0xFF) { "TLV value 过长: ${this.value.size} > 255" }
+        require(raw.size <= 0xFF) { "TLV value 过长: ${raw.size} > 255" }
     }
 
-    val length: Int get() = value.size
+    /** 对外只读：每次返回副本。 */
+    val value: ByteArray get() = raw.copyOf()
+
+    val length: Int get() = raw.size
 
     /** 编码后占用的字节数（含 tag 与 length 两个字节）。 */
-    val encodedSize: Int get() = 2 + value.size
+    val encodedSize: Int get() = 2 + raw.size
+
+    /**
+     * 模块内部取原始数组（不拷贝）。
+     * 只在 TLV 序列化这类"立刻写进新数组"的热路径上用，避免每字节一次分配。
+     */
+    internal fun rawValue(): ByteArray = raw
 
     fun encode(): ByteArray {
         val out = ByteArray(encodedSize)
         out[0] = tag.toByte()
-        out[1] = value.size.toByte()
-        value.copyInto(out, 2)
+        out[1] = raw.size.toByte()
+        raw.copyInto(out, 2)
         return out
     }
 
     override fun equals(other: Any?): Boolean =
-        other is TlvParam && other.tag == tag && other.value.contentEquals(value)
+        other is TlvParam && other.tag == tag && other.raw.contentEquals(raw)
 
-    override fun hashCode(): Int = 31 * tag + value.contentHashCode()
+    override fun hashCode(): Int = 31 * tag + raw.contentHashCode()
 
     override fun toString(): String =
         "Tlv(0x${tag.toString(16).uppercase().padStart(2, '0')}, len=$length, ${Hex.encode(value)})"
@@ -104,9 +119,12 @@ object Tlv {
         val out = ByteArray(total)
         var off = 0
         for (p in params) {
+            // 用 rawValue() 而不是 value：后者每次访问都要拷贝一份，
+            // 序列化上千字节的配置块时会白白产生上万次小数组分配。
+            val v = p.rawValue()
             out[off] = p.tag.toByte()
-            out[off + 1] = p.value.size.toByte()
-            p.value.copyInto(out, off + 2)
+            out[off + 1] = v.size.toByte()
+            v.copyInto(out, off + 2)
             off += p.encodedSize
         }
         return out
@@ -114,5 +132,7 @@ object Tlv {
 
     /** 只用于调试输出，格式 `33 04 42 4D 44 4A`。 */
     fun describe(params: List<TlvParam>): String =
-        params.joinToString("\n") { "0x${it.tag.toString(16).uppercase().padStart(2, '0')} len=${it.length} ${Hex.encode(it.value)}" }
+        params.joinToString("\n") {
+            "0x${it.tag.toString(16).uppercase().padStart(2, '0')} len=${it.length} ${Hex.encode(it.rawValue())}"
+        }
 }
