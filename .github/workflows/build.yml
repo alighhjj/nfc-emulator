@@ -134,6 +134,14 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: warn
 
+      # 开发机到 github.com 不可达，Actions artifact 下载不了，
+      # 所以把 APK 也 commit 到 artifacts 分支，走 git 通道取用。
+      - name: 把 APK 推到 artifacts 分支
+        if: success() && github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash tools/ci-publish-artifacts.sh
+
       - name: 失败时回传日志（注解 + ci-logs 分支）
         if: failure()
         env:

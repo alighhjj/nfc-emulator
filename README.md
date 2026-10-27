@@ -122,7 +122,35 @@ git push origin v0.1.0
 > 为什么不用 AGP 的 `signingConfig`：它给不出 v4（`.idsig`），而且要求把 keystore 口令写进
 > Gradle 配置。`apksigner` 手动签能一次拿齐四个方案。
 
-### 4. 关于 gradle wrapper
+### 4. 取 APK / 看日志：两条绕开网页的通道
+
+本项目的开发网络到 `github.com:443` 是 **502**（直连也超时），Actions 网页打不开，
+artifact 下载要登录，job logs API 要 token。所以 CI 额外做了两条 git 通道：
+
+| 通道 | 分支 | 内容 |
+|---|---|---|
+| 编译产物 | `artifacts` | `apk/app-debug.apk`、`apk/app-release-unsigned.apk`、`SHA256SUMS.txt` |
+| 失败诊断 | `ci-logs` | 各 job 的完整 gradle 日志、JUnit XML、lint 报告 |
+
+取 APK：
+
+```bash
+git fetch origin artifacts
+git show origin/artifacts:apk/app-debug.apk > app-debug.apk
+```
+
+看最近一次失败的日志：
+
+```bash
+git fetch origin ci-logs
+git show origin/ci-logs:test/ci-build.log | tail -60
+```
+
+两个分支都是 `git push -f` 覆盖式更新，不保留历史，不参与 `main` 的任何流程。
+失败时还会把关键错误行（`e: `、`FAILURE:`、`Unresolved reference` 等）写成
+check-run 注解，`api.github.com` 可匿名读取，比拉整份日志更快。
+
+### 5. 关于 gradle wrapper
 
 仓库里**没有** `gradle-wrapper.jar`（二进制产物，作者本机无法可信地生成 ——
 网络访问被企业代理挡了，拿不到 Gradle 发行包）。CI 用官方
@@ -163,7 +191,7 @@ python tools/nxp_conf.py patch libnfc-nxp.conf 42:4D:44:4A   # 打印 diff，不
 
 | | 内容 | 状态 |
 |---|---|---|
-| M0 | 骨架、构建链、CI、兼容性诊断 | **本次完成** |
+| M0 | 骨架、构建链、CI、兼容性诊断 | **已完成，CI 全绿（69 个单测通过，debug APK 可出）** |
 | M1 | 读卡：reader mode + 各 tech 的 UID/ATQA/SAK 采集 | 待做 |
 | M2 | MIFARE Classic 扇区 dump（含 Crypto1 认证）、卡片库存储 | 待做 |
 | M3 | **UID 注入**（`RUNTIME_NCI` / `CONF_INPLACE`）+ 回滚状态机 | 待做 |
