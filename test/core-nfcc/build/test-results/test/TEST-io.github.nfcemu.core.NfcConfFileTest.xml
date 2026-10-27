@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.nfcemu.core.NfcConfFileTest" tests="17" skipped="0" failures="0" errors="0" timestamp="2026-10-27T11:29:37" hostname="runnervm48cm3" time="0.059">
+  <properties/>
+  <testcase name="findBlock 不会把 NXP_CORE_CONF 匹配到 NXP_CORE_CONF_EXTN" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.016"/>
+  <testcase name="listKeys 枚举出全部大写下划线键" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.012"/>
+  <testcase name="十字节三长 UID 也能写入" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.018"/>
+  <testcase name="等长改写只动四个字符位置，其余文本逐字符不变" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.002"/>
+  <testcase name="findBlock 对不存在的键返回 null" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <testcase name="冒号分隔与小写风格的区块被正确识别" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="readUid 读出核心配置与射频配置各自的 UID" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <testcase name="纯空格分隔且无逗号的风格被正确识别" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="HexTextIndex 把每个字节映射回字符区间" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="HexTextIndex 对奇数位字符返回 null" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="7 字节改回 4 字节" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="readBytes 对不含 TAG_ID 的区块返回原始字节" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <testcase name="区块不存在时抛异常" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <testcase name="平台推断优先识别 NXP" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.002"/>
+  <testcase name="HexTextIndex 忽略 0x 前缀" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.0"/>
+  <testcase name="4 字节改 7 字节会同步改写 length 字段" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <testcase name="区块里没有 TAG_ID 时抛异常" classname="io.github.nfcemu.core.NfcConfFileTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

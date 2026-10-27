@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.nfcemu.core.NxpCoreConfCodecTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-10-27T11:29:37" hostname="runnervm48cm3" time="0.008">
+  <properties/>
+  <testcase name="等长替换拒绝不同长度" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.002"/>
+  <testcase name="变长替换会同步改写 length 字节" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="空配置返回 null" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="读出当前 UID" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="纯 TLV 配置优先走严格链解析" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="值里恰好出现 0x33 时不会误定位" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.001"/>
+  <testcase name="纯 TLV 配置的 smart 替换保持参数顺序" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.002"/>
+  <testcase name="找不到 TAG_ID 时抛异常而不是返回原样" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="变长替换在长度相同时等价于等长替换" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="等长替换只改动 value 的四个字节" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.001"/>
+  <testcase name="已设置相同 UID 时 alreadySet 为真" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <testcase name="在带非 TLV 前缀的配置里定位到 TAG_ID" classname="io.github.nfcemu.core.NxpCoreConfCodecTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
